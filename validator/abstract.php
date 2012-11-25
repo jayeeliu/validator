@@ -10,13 +10,22 @@
  */
 abstract class Validator_Abstract {
 	/**
-	 * 用于定义当前类的默认配置项，需要定义全部可支持的配置，以便于查找$option参数支持的设置
+	 * 用于保存了当前具体验证类的option参数中所有可配置项（必须为每个设置项设置默认值，以便于使用时查找验证类支持的设置项）；
+	 *
+	 * 为了产品使用上的便利，可以在 config/validator/error.php 中定义错误信息，并在各个action方法中直接作为默认的错误号和错误信息使用
+	 * 也可以在调用时传入'option'=>array('error'=>'')参数指定错误信息
+	 * 如果只传入message，则程序会使用默认的错误号和指定的错误信息
+	 *
 	 * @var array
 	 */
-	protected $_default_settings = array();
+	protected $_default_settings = array(
+		'error'         => false,
+		'error_message' => '',
+	);
 
 	/**
-	 * 判断该类是否支持filter模式，如果支持，需要覆盖此方法，并在action对filter模式兼容
+	 * 判断该类是否支持filter模式
+	 * 如果支持，需要覆盖此方法，return true; 并在action对filter模式兼容
 	 * 否则，如果失败验证，随即抛出异常
 	 * @return bool
 	 */
@@ -25,7 +34,57 @@ abstract class Validator_Abstract {
 	}
 
 	/**
-	 * 模版方法，合并default_settings
+	 * 如果传入的value是数组，返回时是否需要将数组中的各项拆分成单独值
+	 * @return bool
+	 */
+	public function is_extract_array() {
+		return false;
+	}
+
+	/**
+	 * 根据错误号和检查类型(Validator::VALIDATOR|Validator::FILTER)决定未通过检查时的处理方式
+	 *
+	 * @param string $filter
+	 * @param mixed $error
+	 * @param mixed $default
+	 * @return mixed
+	 * @throws Validator_Exception
+	 */
+	protected function exception_check_params_handle($filter, $error, $default='') {
+		if ($filter === Validator::VALIDATOR) {
+			$this->throw_exception($error);
+		} elseif ($filter === Validator::FILTER) {
+			return $default;
+		}
+	}
+
+	protected function throw_exception($error) {
+		if (is_array($error)) {
+			if (array_key_exists('error', $error)) {
+				if ($error['error']) {
+					throw new Validator_Exception($error['error']);
+				}
+				unset($error['error']);
+			}
+
+			// 去掉空的错误信息
+			if (array_key_exists('error_message', $error) && !$error['error_message']) {
+				unset($error['error_message']);
+			}
+
+			if (count($error) === 1) {
+				$error = array_pop($error);
+			}
+		}
+		throw new Validator_Exception($error);
+	}
+
+	/**
+	 * 模版方法
+	 *  1. 合并default_settings属性和option参数
+	 *  2. 判断是否支持filter模式
+	 *  3. 调用验证方法
+	 *
 	 * @param mixed $value  需要验证的内容
 	 * @param int $filter   filter或validator模式
 	 * @param array $option 其他的配置信息
@@ -62,17 +121,29 @@ abstract class Validator_Abstract {
 }
 
 class Validator_Exception extends Exception {
-	static $_error_config = array();
-	public function __construct($message, $code=0, $previous=null) {
-		if (empty(self::$_error_config)) {
-			self::$_error_config = include dirname(__FILE__).'/../error.php';
-		}
-
-		if (substr($message, 0, 6) === 'error.') {
-			$key = substr($message, 6);
-			if (isset(self::$_error_config[$key])) {
-				list($code, $message) = SConfig::get('validator/error.'.$message);
+	public function __construct($message, $code=0, Exception $previous=null) {
+		if (is_array($message)) {
+			if (isset($message['type'])) {
+				$type = $message['type'];
+				unset($message['type']);
+			} else {
+				$type = $message[0];
+				unset($message[0]);
 			}
+			list($code, $msg) = Validator_Config::get($type);
+
+			if (isset($message['error_message']) && $message['error_message']) {
+				$msg = $message['error_message'];
+				unset($message['error_message']);
+			}
+			$count      = count($message);
+			$count_match= preg_match_all('/(?<!%)%[\.a-zA-Z0-9]+/', $msg, $m);
+			if ($count_match > $count) {
+				$message = array_merge($message, array_fill(0, $count_match-$count, ''));
+			}
+			$message = vsprintf($msg, $message);
+		} elseif (substr($message, 0, 6) === 'error.') {
+			list($code, $message) = Validator_Config::get($message);
 		}
 		parent::__construct($message, (int)$code, $previous);
 	}

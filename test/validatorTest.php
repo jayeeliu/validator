@@ -1,6 +1,8 @@
 <?php
 require_once dirname(__FILE__).'/../validator.php';
 class ValidatorTest extends PHPUnit_Framework_TestCase {
+	public function setUp() {}
+
 	public function test_validator_check() {
 		$email = 'www@sina.cn';
 		$ip = '1.1.1.1';
